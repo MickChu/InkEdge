@@ -1,0 +1,42 @@
+# InkEdge — Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 运行时
+*.log
+.pytest_cache/
+tests/_test_retrieval_tmp/
+
+# 敏感文件
+.env
+.env.*
+secrets.json
+secrets.yaml
+
+# 用户数据
+projects/
+output/
+*.epub
+*.mobi
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db

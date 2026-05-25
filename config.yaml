@@ -1,0 +1,20 @@
+# InkEdge 配置文件
+# 复制此文件为 config.yaml，填入你的 API Key 即可使用。
+# 开源版默认使用 DeepSeek API（OpenAI 兼容接口），也可替换为其他兼容服务。
+
+api_key: 【在此填入你的API Key】
+base_url: https://api.deepseek.com/v1
+model_name: deepseek-v4-flash
+interface_format: OpenAI
+temperature: 0.7
+max_tokens: 8192
+timeout: 600
+fallback_models:
+- deepseek-chat
+# Embedding 由 VectorStore 本地 sentence-transformers 处理，无需 API 配置
+embedding_retrieval_k: 4
+default_genre: 奇幻
+default_chapters: 60
+default_words_per_chapter: 3000
+default_template: unified
+worldbuilding_depth: standard
