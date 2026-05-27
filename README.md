@@ -75,32 +75,32 @@ pip install -r requirements.txt
 ### 建书
 
 ```bash
-python main.py new --name "大宋秘谍" --topic "北宋穿越者发现前穿越者已点歪科技树，需刹车" --genre 历史架空 --chapters 360
+python main.py new --name "我的小说" --topic "一个青年在末世中觉醒异能，带领幸存者重建文明" --genre 科幻 --chapters 360
 ```
 
 ### 写稿
 
 ```bash
-python main.py write --name "大宋秘谍" --chapter 1 --guidance "沈安穿越醒来，发现自己附身在一个濒死的衙役身上"
+python main.py write --name "我的小说" --chapter 1 --guidance "主角首次展现异能，在丧尸围攻中救下一名幸存者"
 ```
 
 ### 校验
 
 ```bash
-python main.py check --name "大宋秘谍" --chapter 1
+python main.py check --name "我的小说" --chapter 1
 ```
 
 ### 结算（本章状态/角色/情节全面更新）
 
 ```bash
-python main.py settle --name "大宋秘谍" --chapter 1
+python main.py settle --name "我的小说" --chapter 1
 ```
 
 ### 查看状态
 
 ```bash
-python main.py status --name "大宋秘谍"     # 项目概览
-python main.py state --name "大宋秘谍"       # 角色状态（物品/能力/关系）
+python main.py status --name "我的小说"     # 项目概览
+python main.py state --name "我的小说"       # 角色状态（物品/能力/关系）
 ```
 
 ---
