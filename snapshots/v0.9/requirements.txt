@@ -1,0 +1,21 @@
+# InkEdge — Python 统一小说生成框架
+# 核心依赖
+
+# LLM 调用
+aiohttp>=3.9
+openai>=1.0
+
+# 向量检索（Phase 4）
+chromadb>=0.5
+sentence-transformers>=3.0
+langchain>=0.2
+langchain-chroma>=0.1
+
+# GUI（Phase 7）
+streamlit>=1.28
+
+# 文本处理
+nltk>=3.8
+
+# 配置
+pyyaml>=6.0
