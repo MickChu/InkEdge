@@ -1,0 +1,28 @@
+# InkEdge 配置文件
+# 复制此文件为 config.yaml 并填入你的 API Key
+
+api_key: 【在此填入你的 API Key】
+base_url: https://api.deepseek.com/v1
+interface_format: OpenAI
+temperature: 0.7
+max_tokens: 8192
+timeout: 600
+model_name: deepseek-v4-flash
+models:
+  primary: deepseek-v4-flash
+  available:
+    - deepseek-v4-flash
+    - deepseek-v4-pro
+  fallback:
+    - deepseek-v4-flash
+  urls:
+    deepseek-v4-flash: https://api.deepseek.com/v1
+    deepseek-v4-pro: https://api.deepseek.com/v1
+  local: []
+  params: {}
+embedding_retrieval_k: 4
+default_genre: 奇幻
+default_chapters: 60
+default_words_per_chapter: 3000
+default_template: unified
+worldbuilding_depth: standard

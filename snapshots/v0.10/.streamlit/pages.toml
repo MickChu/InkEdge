@@ -1,0 +1,54 @@
+[[pages]]
+path = "studio.py"
+name = "仪表盘"
+icon = "🏠"
+
+[[pages]]
+path = "01_new_project.py"
+name = "新建项目"
+icon = "📖"
+
+[[pages]]
+path = "02_write.py"
+name = "写稿工作台"
+icon = "✍️"
+
+[[pages]]
+path = "03_style.py"
+name = "风格管理"
+icon = "🎨"
+
+[[pages]]
+path = "04_index.py"
+name = "向量索引"
+icon = "🔎"
+
+[[pages]]
+path = "05_check.py"
+name = "质量校验"
+icon = "🔍"
+
+[[pages]]
+path = "06_state.py"
+name = "角色状态"
+icon = "⚔️"
+
+[[pages]]
+path = "07_worldbuilding.py"
+name = "世界观"
+icon = "🌍"
+
+[[pages]]
+path = "08_characters.py"
+name = "角色卡"
+icon = "👤"
+
+[[pages]]
+path = "09_doctor.py"
+name = "环境诊断"
+icon = "🩺"
+
+[[pages]]
+path = "10_analysis.py"
+name = "写作分析"
+icon = "📊"
