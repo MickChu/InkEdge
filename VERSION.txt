@@ -1,0 +1,4 @@
+version: v0.10
+snapshot: v0.10
+
+新增: Doctor环境诊断 + 章节改写 + 多模型支持

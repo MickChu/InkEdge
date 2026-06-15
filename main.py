@@ -191,6 +191,13 @@ async def cmd_new(args):
     if not from_dir:
         log.info(f"   ✨ 自由创作模式（仅基于主题描述）")
 
+    # --model 覆盖
+    model = getattr(args, 'model', None)
+    if model:
+        from src.utils.config import config as cfg
+        cfg.set("model_name", model)
+        log.info(f"   模型: {model}")
+
     orchestrator = Orchestrator(project_dir)
     architect = ArchitectAgent(template_name=template_name)
     steps = [PipelineStep(agent=architect, required=True)]
@@ -222,6 +229,13 @@ async def cmd_write(args):
     log.info(f"📝 续写第 {args.chapter} 章: {args.name}")
     if guidance:
         log.info(f"   指导: {guidance}")
+
+    # --model 覆盖
+    model = getattr(args, 'model', None)
+    if model:
+        from src.utils.config import config as cfg
+        cfg.set("model_name", model)
+        log.info(f"   模型: {model}")
 
     context = AgentContext(
         project_dir=project_dir,
@@ -472,6 +486,57 @@ async def cmd_state(args):
     print(context)
 
 
+async def cmd_revise(args):
+    """改写已有章节"""
+    import os
+    from src.core.base_agent import AgentContext
+    from src.core.orchestrator import Orchestrator, PipelineStep
+    from src.agents.revise import ReviseAgent
+
+    project_dir = get_project_dir(args.name)
+    if not os.path.exists(project_dir):
+        log.error(f"项目 '{args.name}' 不存在")
+        sys.exit(1)
+
+    guidance = getattr(args, 'guidance', '') or ''
+    word_count = getattr(args, 'words', 3000)
+
+    log.info(f"✏️ 改写第 {args.chapter} 章: {args.name}")
+    if guidance:
+        log.info(f"   指导: {guidance}")
+
+    # --model 覆盖
+    model = getattr(args, 'model', None)
+    if model:
+        from src.utils.config import config as cfg
+        cfg.set("model_name", model)
+        log.info(f"   模型: {model}")
+
+    context = AgentContext(
+        project_dir=project_dir,
+        user_guidance=guidance,
+        extra={
+            "chapter_number": args.chapter,
+            "word_count": word_count,
+        },
+    )
+
+    orchestrator = Orchestrator(project_dir)
+    reviser = ReviseAgent()
+    steps = [PipelineStep(agent=reviser, required=True)]
+
+    result = await orchestrator.run_sequential(steps, context)
+
+    if result.success:
+        updates = result.final_context.extra if result.final_context else {}
+        log.info(f"✅ 第 {args.chapter} 章改写完成!")
+        log.info(f"   字数: {updates.get('original_length', '?')} → {updates.get('revised_length', '?')}")
+        log.info(f"   备份: {os.path.basename(updates.get('bak_path', ''))}")
+    else:
+        log.error(f"❌ 改写失败: {result.error}")
+        sys.exit(1)
+
+
 async def cmd_studio(args):
     """启动 Studio GUI"""
     import subprocess
@@ -549,6 +614,7 @@ async def cmd_radar(args):
 
 
 async def _cmd_radar_scan(args, sources, llm):
+    from src.radar import RadarAgent
     agent = RadarAgent(sources=sources)
     print(f"📡 市场雷达扫描: {args.genre or '全榜'} | 来源: {args.source}")
     report = await agent.scan(genre=args.genre, limit=args.limit, llm_client=llm)
@@ -566,6 +632,7 @@ async def _cmd_radar_scan(args, sources, llm):
 
 
 async def _cmd_radar_trends(args, sources, llm):
+    from src.radar import RadarAgent
     agent = RadarAgent(sources=sources)
     print(f"📈 品类趋势识别: {args.source}")
     trends = await agent.identify_trends(limit=args.limit, llm_client=llm)
@@ -584,6 +651,7 @@ async def _cmd_radar_trends(args, sources, llm):
 
 
 async def _cmd_radar_cluster(args, llm):
+    from src.radar import RadarAgent
     agent = RadarAgent()
     print(f"🔗 分类归并分析: {args.source}")
     cluster = await agent.cluster_genres(source=args.source, llm_client=llm)
@@ -607,6 +675,106 @@ async def _cmd_radar_cluster(args, llm):
             print(f"   - {s}")
 
 
+async def cmd_doctor(args):
+    """环境诊断"""
+    import json as _json
+    from src.doctor import DoctorOrchestrator
+
+    orch = DoctorOrchestrator(
+        api_only=args.api_only,
+        project=args.project,
+    )
+    report = await orch.run_async()
+
+    if args.json:
+        print(_json.dumps(report.to_json(), ensure_ascii=False, indent=2))
+    else:
+        print(report.format_cli())
+
+    # --fix: 自动修复简单问题
+    if args.fix:
+        fixed = report.auto_fix()
+        if fixed:
+            print(f"  🔧 已自动修复 {fixed} 个问题")
+
+    if report.has_errors():
+        sys.exit(1)
+
+
+async def cmd_analyze(args):
+    """写作质量分析: density / foreshadow / conflict"""
+    import os
+    project_dir = get_project_dir(args.name)
+    if not os.path.exists(project_dir):
+        log.error(f"项目 '{args.name}' 不存在")
+        sys.exit(1)
+
+    mode = args.mode
+
+    # 迁移先执行（避免分析时数据还是旧的）
+    if args.migrate:
+        from src.analysis import ForeshadowTracker
+        ft = ForeshadowTracker(project_dir)
+        count = ft.migrate_from_md()
+        if count > 0:
+            log.info(f"✅ 从 pending_hooks.md 迁移 {count} 条伏笔到 foreshadow.json")
+        else:
+            log.info("  无待迁移数据")
+
+    if mode in ("density", "all"):
+        from src.analysis import DensityAnalyzer
+        da = DensityAnalyzer(project_dir)
+
+        if args.fill:
+            target = getattr(args, 'target', 'description') or 'description'
+            log.info(f"💧 灌水模式: 提升 {target} 密度")
+            report = da.analyze_fill(target_density=target)
+        else:
+            report = da.analyze()
+
+        print(f"\n📊 {args.name} — 密度分析")
+        print("-" * 55)
+        if not report.stats:
+            print("  无章节数据")
+        else:
+            hdr = f'{"章":>4} {"字数":>6} {"对话%":>6} {"动作%":>6} {"描写%":>6} {"内心%":>6}'
+            print(hdr)
+            print("-" * 55)
+            for s in report.stats:
+                print(f'{s.chapter:>4} {s.total_chars:>6} {s.dialogue_pct:>5.0f}% {s.action_pct:>5.0f}% {s.description_pct:>5.0f}% {s.inner_pct:>5.0f}%')
+
+        if report.warnings:
+            print(f"\n⚠️ 节奏警告:")
+            for w in report.warnings:
+                print(f"  {w}")
+        if report.fill_suggestions:
+            print(f"\n💧 灌水建议:")
+            for f in report.fill_suggestions:
+                print(f"  {f}")
+
+    if mode in ("foreshadow", "all"):
+        from src.analysis import ForeshadowTracker
+        ft = ForeshadowTracker(project_dir)
+        rpt = ft.report()
+        print(f"\n🎯 {args.name} — 伏笔追踪")
+        print(rpt.summary())
+
+        if mode == "foreshadow" and args.list:
+            for status, label in [("pending", "待回收"), ("reminded", "已提醒"), ("resolved", "已回收")]:
+                items = getattr(rpt, status)
+                if items:
+                    print(f"\n  {label}:")
+                    for h in items:
+                        print(f"    {h.id}: {h.description[:60]}")
+
+    if mode in ("conflict", "all"):
+        from src.analysis import ConflictTracker
+        ct = ConflictTracker(project_dir)
+        report = ct.analyze()
+        print(f"\n⚔️  {args.name} — 冲突追踪")
+        print(report.summary())
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="InkEdge — Python 统一小说生成框架",
@@ -627,6 +795,7 @@ def main():
     p_new.add_argument("--template", default="unified", help="写作方法论模板（默认: unified）")
     p_new.add_argument("--from-dir", "-d", help="从已有材料目录加载（读取 .md/.txt，忠实转写为 foundation）")
     p_new.add_argument("--wizard", action="store_true", help="交互式逐步建书：每步生成后暂停，供作者审核修改")
+    p_new.add_argument("--model", "-m", help="指定模型（如 deepseek-v4-pro）")
 
     # write — 写稿
     p_write = subparsers.add_parser("write", help="续写章节")
@@ -634,6 +803,15 @@ def main():
     p_write.add_argument("--chapter", "-c", type=int, required=True, help="章号")
     p_write.add_argument("--guidance", "-g", help="本章写作指导")
     p_write.add_argument("--words", "-w", type=int, default=3000, help="目标字数")
+    p_write.add_argument("--model", "-m", help="指定模型（如 deepseek-v4-pro）")
+
+    # revise — 改写章节
+    p_revise = subparsers.add_parser("revise", help="改写已有章节")
+    p_revise.add_argument("--name", "-n", required=True, help="书名")
+    p_revise.add_argument("--chapter", "-c", type=int, required=True, help="章号")
+    p_revise.add_argument("--guidance", "-g", help="修改指导（如：加强战斗描写、增加对话密度）")
+    p_revise.add_argument("--words", "-w", type=int, default=3000, help="目标字数")
+    p_revise.add_argument("--model", "-m", help="指定模型（如 deepseek-v4-pro）")
 
     # style — 风格分析
     p_style = subparsers.add_parser("style", help="风格管理")
@@ -681,6 +859,28 @@ def main():
     p_radar_cluster = p_radar_sub.add_parser("cluster", help="分析平台分类→创作品类归并")
     p_radar_cluster.add_argument("--source", "-s", default="all", help="平台: fanqie/qidian/all")
 
+    # doctor — 环境诊断
+    p_doctor = subparsers.add_parser("doctor", help="环境诊断（Python/依赖/配置/API/项目）")
+    p_doctor.add_argument("--api-only", action="store_true", help="仅检查 API 连通性")
+    p_doctor.add_argument("--project", help="检查特定项目")
+    p_doctor.add_argument("--json", action="store_true", help="JSON 输出（供脚本调用）")
+    p_doctor.add_argument("--fix", action="store_true", help="自动修复简单问题")
+
+    # analyze — 写作质量分析
+    p_analyze = subparsers.add_parser("analyze", help="写作质量分析（密度/伏笔/冲突）")
+    p_analyze.add_argument("--name", "-n", required=True, help="书名")
+    p_analyze.add_argument("--mode", "-m", default="all",
+                           choices=["density", "foreshadow", "conflict", "all"],
+                           help="分析模式 (默认: all)")
+    p_analyze.add_argument("--fill", action="store_true",
+                           help="灌水模式: 找出密度偏低的章节, 给扩展建议")
+    p_analyze.add_argument("--target", choices=["dialogue", "action", "description", "inner"],
+                           default="description", help="灌水目标类型")
+    p_analyze.add_argument("--list", action="store_true",
+                           help="列出所有伏笔详情")
+    p_analyze.add_argument("--migrate", action="store_true",
+                           help="从 pending_hooks.md 迁移伏笔到结构化格式")
+
     # studio — GUI
     subparsers.add_parser("studio", help="启动 Studio GUI")
 
@@ -695,6 +895,7 @@ def main():
         "new": cmd_new,
         "templates": cmd_templates,
         "write": cmd_write,
+        "revise": cmd_revise,
         "style": cmd_style,
         "index": cmd_index,
         "check": cmd_check,
@@ -703,6 +904,8 @@ def main():
         "radar": cmd_radar,
         "status": cmd_status,
         "studio": cmd_studio,
+        "doctor": cmd_doctor,
+        "analyze": cmd_analyze,
     }
 
     cmd_func = commands.get(args.command)

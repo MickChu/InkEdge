@@ -62,9 +62,18 @@ class LLMClient:
         print(response.content)
     """
 
-    def __init__(self, **kwargs):
-        self.config = LLMConfig(**{k: v for k, v in kwargs.items() if k in LLMConfig.__dataclass_fields__})
+    def __init__(self, model_name: str = None, **kwargs):
+        from src.utils.config import get_config
+        cfg = get_config()
+        fc = {k: v for k, v in kwargs.items() if k in LLMConfig.__dataclass_fields__}
+        if "model_name" not in fc:
+            fc["model_name"] = model_name or cfg.get("model_name", "deepseek-v4-flash")
+        if "fallback_models" not in fc:
+            models_cfg = cfg.get("models", {})
+            fc["fallback_models"] = models_cfg.get("fallback", [fc["model_name"]])
+        self.config = LLMConfig(**fc)
         self._total_usage = LLMUsage()
+        self._default_model = fc["model_name"]
 
     @property
     def model_name(self) -> str:
@@ -78,19 +87,47 @@ class LLMClient:
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    def _get_base_url(self) -> str:
-        """获取 API base URL（优先级：实例参数 > 环境变量 > config.yaml > 默认值）"""
+    def _get_base_url(self, model_name: str = None) -> str:
+        """获取 API base URL，支持按模型路由"""
         if self.config.base_url:
             return self.config.base_url.rstrip("/")
         from src.utils.config import get_config
-        return get_config().get("base_url", "https://api.deepseek.com/v1").rstrip("/")
+        cfg = get_config()
+        models_cfg = cfg.get("models", {})
+        
+        # 1. 按模型查找专用 URL
+        mn = model_name or self.config.model_name
+        if mn:
+            urls = models_cfg.get("urls", {})
+            if mn in urls:
+                return urls[mn].rstrip("/")
+        
+        # 2. 全局 base_url
+        return cfg.get("base_url", "https://api.deepseek.com/v1").rstrip("/")
 
-    def _get_api_key(self) -> str:
-        """获取 API Key（优先级：实例参数 > 环境变量 > config.yaml > 默认空）"""
+    def _get_api_key(self, model_name: str = None) -> str:
+        """获取 API Key，本地模型不需要"""
         if self.config.api_key:
             return self.config.api_key
         from src.utils.config import get_config
-        return get_config().get("api_key", "")
+        cfg = get_config()
+        models_cfg = cfg.get("models", {})
+        
+        # 本地模型不需要 API Key
+        mn = model_name or self.config.model_name
+        local_models = models_cfg.get("local", [])
+        if mn in local_models:
+            return ""
+        
+        return cfg.get("api_key", "")
+
+    def _get_model_params(self, model_name: str) -> dict:
+        """获取模型专属推理参数"""
+        from src.utils.config import get_config
+        cfg = get_config()
+        models_cfg = cfg.get("models", {})
+        params_cfg = models_cfg.get("params", {})
+        return params_cfg.get(model_name, {})
 
     async def chat(
         self,
@@ -105,8 +142,8 @@ class LLMClient:
 
         model_name = model or self.config.model_name
         messages = self._build_messages(prompt, system_prompt)
-        base_url = self._get_base_url()
-        api_key = self._get_api_key()
+        base_url = self._get_base_url(model_name)
+        api_key = self._get_api_key(model_name)
 
         payload = {
             "model": model_name,
@@ -115,10 +152,16 @@ class LLMClient:
             "max_tokens": max_tokens or self.config.max_tokens,
         }
 
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
+        # 模型专属参数（RWKV 等）
+        mp = self._get_model_params(model_name)
+        if mp:
+            for key in ["top_p", "presence_penalty", "frequency_penalty"]:
+                if key in mp:
+                    payload[key] = mp[key]
+
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
 
         endpoint = f"{base_url}/chat/completions"
         timeout = aiohttp.ClientTimeout(total=self.config.timeout)

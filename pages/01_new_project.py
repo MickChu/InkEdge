@@ -229,6 +229,19 @@ template = st.radio(
     help="Unified 是默认推荐，更贴近 inkOS 工作流。Snowflake 更传统。"
 )
 
+# ─── 模型选择 ───
+from src.utils.config import get_config
+cfg = get_config()
+models_cfg = cfg.get("models", {})
+available = models_cfg.get("available", ["deepseek-v4-flash"])
+default_m = models_cfg.get("primary", "deepseek-v4-flash")
+model_name = st.selectbox(
+    "AI 模型",
+    available,
+    index=available.index(default_m) if default_m in available else 0
+)
+cfg.set("model_name", model_name)
+
 wizard_mode = st.checkbox("🧙 交互式逐步建书", value=True,
                           help="每步生成后暂停，供你审核修改。关掉则一键生成全部。")
 

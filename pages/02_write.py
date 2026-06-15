@@ -1,8 +1,9 @@
 """
 写稿工作台 — Streamlit 页面
 
-左右分栏：控制面板 + 上下文预览/生成结果
-对应 CLI: python main.py write
+左右分栏：控制面板 + 生成结果
+支持两种模式：续写新章 / 改写旧章
+对应 CLI: python main.py write / revise
 """
 import sys, os
 from pathlib import Path
@@ -20,10 +21,9 @@ q = st.query_params
 proj_name = q.get("name", "")
 
 if not proj_name:
-    # 列出可选项目
     projects_dir = PROJECT_ROOT / "projects"
     if projects_dir.exists():
-        names = [d.name for d in projects_dir.iterdir() if d.is_dir()]
+        names = [d.name for d in projects_dir.iterdir() if d.is_dir() and not d.name.startswith(("_", "."))]
     else:
         names = []
     proj_name = st.selectbox("选择项目", names) if names else st.text_input("项目名")
@@ -40,10 +40,34 @@ if not project_dir.exists():
 
 st.title(f"✍️ 写稿工作台: {proj_name}")
 
+# ─── 模式切换 ───
+mode = st.radio("模式", ["✍️ 写新章", "🔄 改写章节"], horizontal=True)
+
 # ─── 获取已有章节 ───
 ch_dir = project_dir / "chapters"
-existing_chs = sorted([int(f.stem) for f in ch_dir.glob("*.md")]) if ch_dir.exists() else []
+existing_chs = []
+if ch_dir.exists():
+    for f in ch_dir.iterdir():
+        if f.suffix in (".md", ".txt"):
+            try:
+                num = int(f.stem.replace("chapter_", "").split("_")[0])
+                existing_chs.append(num)
+            except ValueError:
+                # 中文命名如 0001_迭代 V2.md
+                try:
+                    num = int(f.stem[0:4])
+                    existing_chs.append(num)
+                except ValueError:
+                    pass
+existing_chs = sorted(set(existing_chs))
 next_ch = max(existing_chs) + 1 if existing_chs else 1
+
+# ─── AI 模型选择 ───
+from src.utils.config import get_config
+cfg = get_config()
+models_cfg = cfg.get("models", {})
+available_models = models_cfg.get("available", ["deepseek-v4-flash"])
+default_model = models_cfg.get("primary", "deepseek-v4-flash")
 
 # ─── 左侧控制栏 ───
 left, right = st.columns([1, 2])
@@ -51,67 +75,128 @@ left, right = st.columns([1, 2])
 with left:
     st.subheader("⚙️ 控制面板")
 
-    chapter_num = st.number_input("章节号", min_value=1,
-                                   value=next_ch, step=1)
-    guidance = st.text_area("写作指导",
-                             placeholder="本章关键场景、伏笔推进、对白要点...",
-                             height=100)
+    # 模型选择
+    model_name = st.selectbox(
+        "AI 模型",
+        available_models,
+        index=available_models.index(default_model) if default_model in available_models else 0,
+        help="deepseek-v4-pro: 逻辑更强 / v4-flash: 速度快"
+    )
+
+    if mode == "✍️ 写新章":
+        chapter_num = st.number_input("章节号", min_value=1,
+                                       value=next_ch, step=1)
+    else:
+        chapter_num = st.selectbox(
+            "章节号",
+            existing_chs if existing_chs else [1],
+            help="选择要改写的已写章节"
+        )
+
+    guidance = st.text_area(
+        "写作指导" if mode == "✍️ 写新章" else "修改指导",
+        placeholder="本章关键场景..." if mode == "✍️ 写新章" else "如：加强战斗描写、增加对话密度、精简环境描写",
+        height=100
+    )
     words_target = st.number_input("目标字数", min_value=500,
                                     max_value=10000, value=3000, step=500)
 
-    # 读取卷纲供用户参考
-    vol_file = project_dir / "story" / "outlines" / f"volume_{(chapter_num - 1) // 10 + 1:02d}.md"
-    volume_hint = ""
-    if vol_file.exists():
-        with st.expander("📋 卷纲"):
-            volume_hint = vol_file.read_text(encoding="utf-8")[:2000]
-            st.text_area("卷纲参考", volume_hint, height=150, disabled=True,
-                         label_visibility="collapsed")
+    # 卷纲（仅写新章时显示）
+    if mode == "✍️ 写新章":
+        vol_file = project_dir / "story" / "outlines" / f"volume_{(chapter_num - 1) // 10 + 1:02d}.md"
+        if vol_file.exists():
+            with st.expander("📋 卷纲"):
+                volume_hint = vol_file.read_text(encoding="utf-8")[:2000]
+                st.text_area("卷纲参考", volume_hint, height=150, disabled=True,
+                             label_visibility="collapsed")
 
-    if st.button("✍️ 生成本章", type="primary", use_container_width=True):
-        with st.spinner(f"正在生成第{chapter_num}章... (约30-60秒)"):
-            import asyncio
-            from src.core.llm_client import LLMClient
-            from src.agents.writer import WriterAgent
-            from src.utils.file_io import read_file
+    # 执行按钮
+    btn_label = "✍️ 生成本章" if mode == "✍️ 写新章" else "🔄 改写本章"
+    if st.button(btn_label, type="primary", use_container_width=True):
+        spinner_text = f"正在生成第{chapter_num}章..."
+        if mode == "✍️ 写新章":
+            with st.spinner(spinner_text):
+                import asyncio
+                from src.core.llm_client import LLMClient
+                from src.agents.writer import WriterAgent
 
-            llm = LLMClient()
-            writer = WriterAgent(project_dir=str(project_dir), llm_client=llm)
+                # --model 运行时覆盖
+                cfg.set("model_name", model_name)
 
-            # 读取卷纲
-            vol_text = vol_file.read_text(encoding="utf-8") if vol_file.exists() else ""
+                llm = LLMClient()
+                writer = WriterAgent(project_dir=str(project_dir), llm_client=llm)
+                vol_text = vol_file.read_text(encoding="utf-8") if vol_file.exists() else ""
 
-            try:
-                result = asyncio.run(writer.write_chapter(
-                    chapter_number=chapter_num,
-                    words_target=words_target,
-                    guidance=guidance,
-                    volume_outline=vol_text,
-                ))
-                # 保存生成结果到 session
-                st.session_state["gen_content"] = result.get("content", "")
-                st.session_state["gen_chapter"] = chapter_num
-                st.session_state["gen_words"] = result.get("word_count", 0)
-            except Exception as e:
-                st.error(f"生成失败: {e}")
-                st.exception(e)
+                try:
+                    result = asyncio.run(writer.write_chapter(
+                        chapter_number=chapter_num,
+                        words_target=words_target,
+                        guidance=guidance,
+                        volume_outline=vol_text,
+                    ))
+                    st.session_state["gen_content"] = result.get("content", "")
+                    st.session_state["gen_chapter"] = chapter_num
+                    st.session_state["gen_words"] = result.get("word_count", 0)
+                except Exception as e:
+                    st.error(f"生成失败: {e}")
+        else:
+            # 改写模式
+            with st.spinner(f"正在改写第{chapter_num}章..."):
+                import asyncio
+                from src.core.base_agent import AgentContext
+                from src.core.orchestrator import Orchestrator, PipelineStep
+                from src.agents.revise import ReviseAgent
 
-    # 之前生成的结果
+                cfg.set("model_name", model_name)
+
+                context = AgentContext(
+                    project_dir=str(project_dir),
+                    user_guidance=guidance,
+                    extra={
+                        "chapter_number": chapter_num,
+                        "word_count": words_target,
+                    },
+                )
+                orch = Orchestrator(str(project_dir))
+                reviser = ReviseAgent()
+                steps = [PipelineStep(agent=reviser, required=True)]
+
+                try:
+                    result = asyncio.run(orch.run_sequential(steps, context))
+                    if result.success and result.final_context:
+                        updates = result.final_context.extra or {}
+                        st.session_state["gen_content"] = updates.get("chapter_text", "")
+                        st.session_state["gen_chapter"] = chapter_num
+                        st.session_state["gen_words"] = updates.get("revised_length", 0)
+                        st.session_state["revise_bak"] = updates.get("bak_path", "")
+                    else:
+                        st.error(f"改写失败: {result.error}")
+                except Exception as e:
+                    st.error(f"改写失败: {e}")
+
+    # 生成结果（通用）
     if "gen_content" in st.session_state and st.session_state.get("gen_chapter") == chapter_num:
-        st.success(f"✅ 第{chapter_num}章已生成 ({st.session_state['gen_words']} 字)")
+        word_label = "生成" if mode == "✍️ 写新章" else "改写完成"
+        st.success(f"✅ {word_label} ({st.session_state['gen_words']} 字)")
 
         col_save, col_retry = st.columns(2)
         with col_save:
-            if st.button("💾 保存", use_container_width=True):
+            save_label = "💾 保存" if mode == "✍️ 写新章" else "💾 覆盖原文件(已备份)"
+            if st.button(save_label, use_container_width=True):
                 ch_dir.mkdir(parents=True, exist_ok=True)
-                ch_file = ch_dir / f"{chapter_num:04d}.md"
-                ch_file.write_text(st.session_state["gen_content"], encoding="utf-8")
-                st.success(f"已保存: {ch_file}")
-                # 删除生成缓存
+                # 改写模式：备份已在 ReviseAgent 中完成，这里只写新内容
+                if mode == "✍️ 写新章":
+                    ch_file = ch_dir / f"{chapter_num:04d}.md"
+                    ch_file.write_text(st.session_state["gen_content"], encoding="utf-8")
+                    st.success(f"已保存: {ch_file}")
+                else:
+                    # 改写已由 ReviseAgent 完成保存+备份
+                    st.success(f"第{chapter_num}章已更新，备份为 .bak")
                 del st.session_state["gen_content"]
                 st.rerun()
         with col_retry:
-            if st.button("🔄 重写", use_container_width=True):
+            retry_label = "🔄 重写" if mode == "✍️ 写新章" else "🔄 重新改写"
+            if st.button(retry_label, use_container_width=True):
                 del st.session_state["gen_content"]
                 st.rerun()
 
@@ -128,19 +213,35 @@ with right:
         except Exception as e:
             st.caption(f"上下文加载失败: {e}")
 
-    # 生成结果展示
+    # 生成结果 / 已有章节展示
     if "gen_content" in st.session_state and st.session_state.get("gen_chapter") == chapter_num:
         st.subheader(f"📝 第{chapter_num}章正文")
         st.text_area("正文", st.session_state["gen_content"],
                      height=600, label_visibility="collapsed")
     else:
-        # 显示已有章节
-        existing_file = ch_dir / f"{chapter_num:04d}.md"
-        if existing_file.exists():
-            st.subheader(f"📄 第{chapter_num}章 (已保存)")
-            st.text_area("正文", existing_file.read_text(encoding="utf-8"),
-                         height=600, disabled=True, label_visibility="collapsed")
+        # 显示已有章节（改写模式下自动加载原文）
+        if ch_dir.exists():
+            candidates = [
+                ch_dir / f"chapter_{chapter_num:04d}.md",
+                ch_dir / f"chapter_{chapter_num:04d}.txt",
+            ]
+            for c in candidates:
+                if c.exists():
+                    st.subheader(f"📄 第{chapter_num}章 (当前版本)")
+                    st.text_area("正文", c.read_text(encoding="utf-8"),
+                                 height=600, disabled=True, label_visibility="collapsed")
+                    break
+            else:
+                # 模糊匹配
+                for fname in sorted(ch_dir.iterdir()):
+                    if fname.name.startswith(f"{chapter_num:04d}") and fname.suffix in (".md", ".txt"):
+                        st.subheader(f"📄 第{chapter_num}章 (当前版本)")
+                        st.text_area("正文", fname.read_text(encoding="utf-8"),
+                                     height=600, disabled=True, label_visibility="collapsed")
+                        break
+                else:
+                    st.info("选择参数后点击按钮开始")
         else:
-            st.info("选择参数后点击「生成本章」")
+            st.info("选择参数后点击按钮开始")
 
 floating_home()

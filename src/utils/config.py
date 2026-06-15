@@ -31,8 +31,18 @@ DEFAULT_CONFIG = {
     "max_tokens": 4096,
     "timeout": 600,
 
-    # 回退模型
-    "fallback_models": ["deepseek-chat"],
+    # 多模型配置
+    "models": {
+        "primary": "deepseek-v4-flash",
+        "available": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "fallback": ["deepseek-v4-flash"],
+        "urls": {
+            "deepseek-v4-flash": "https://api.deepseek.com/v1",
+            "deepseek-v4-pro": "https://api.deepseek.com/v1",
+        },
+        "local": [],
+        "params": {},
+    },
 
     # Embedding 由 VectorStore 本地 sentence-transformers 处理，无需 API
     "embedding_retrieval_k": 4,
